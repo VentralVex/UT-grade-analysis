@@ -10,7 +10,8 @@ Sources
 - UNESCO Institute for Statistics indicator 25053: enrolment in tertiary education, all programmes (latest year since 2005);
   Taiwan (not in UIS): Ministry of Education, Education in Taiwan 2025-2026, SY2022 (1,140,089 students).
 - Map outlines (GeoJSON): Plotly's Census county file, PublicaMundi US states, Natural Earth 110m countries.
-- UT Graduate School "Admissions & Enrollment Statistics" dashboard (graduate.utexas.edu), S/Fall 2025 cycle.
+- UT Graduate School "Admissions & Enrollment Statistics" dashboard (graduate.utexas.edu), S/Fall 2025 cycle:
+  selectivity & yield, average GPA and average GRE tabs.
 """
 import io, json, os, re, urllib.parse
 import pandas as pd
@@ -110,9 +111,8 @@ def geojson():
         print(name, len(g['features']))
 
 
-def grad_admissions():
-    """The graduate dashboard has no CSV export; rebuild its text table from the Tableau bootstrap payload."""
-    wb, view = 'AdmissionsEnrollmentStatistics', 'SelectivityYield'
+def tableau_text_table(wb, view):
+    """Rebuild a dashboard text table (School x Program x measures) from the Tableau bootstrap payload (no export button)."""
     s = requests.Session()
     s.get(f'{TABLEAU}/views/{wb}/{view}', params={':embed': 'y', ':showVizHome': 'no'}, timeout=120)
     r = s.post(f'{TABLEAU}/vizql/w/{wb}/v/{view}/startSession/viewing', params={':embed': 'y', ':showVizHome': 'no'}, timeout=120)
@@ -134,18 +134,27 @@ def grad_admissions():
     decode = lambda idx: [values[k] if k >= 0 else values[-k - 1] for k in idx]
     long = pd.DataFrame({'School': decode(pane[1]['aliasIndices']), 'Program': decode(pane[2]['aliasIndices']),
                          'Measure': decode(pane[3]['aliasIndices']), 'Value': decode(pane[4]['aliasIndices'])})
-    d = long.pivot_table(index=['School', 'Program'], columns='Measure', values='Value', aggfunc='first').reset_index()
-    d = d[d.School != 'All']
-    for c in ['Applied', 'Admitted', 'Enrolled']:
-        d[c] = d[c].str.replace(',', '').astype(int)
-    for c in ['Selectivity', 'Yield']:
-        d[c] = pd.to_numeric(d[c].str.rstrip('%'), errors='coerce')     # blank when nobody applied/was admitted
-    d.columns.name = None
-    d.insert(0, 'Admissions Cycle', 'S/Fall 2025')
-    d[['Admissions Cycle', 'School', 'Program', 'Applied', 'Admitted', 'Enrolled', 'Selectivity', 'Yield']].to_csv(
-        f'{GRAD}/admissions_enrollment_sfall2025.csv', index=False)
-    print('grad programs', len(d))
+    d = long.pivot_table(index=['School', 'Program'], columns='Measure', values='Value', aggfunc='first')
+    d.columns = d.columns.str.strip()
+    return d.drop(index='All', level='School')
 
+
+def grad_admissions():
+    """Selectivity & Yield, Average GPA and Average GRE tabs (S/Fall 2025 cycle), merged by program.
+    GPA and GRE averages are over applicants who reported them ("n" columns)."""
+    num = lambda c: pd.to_numeric(c.str.replace(',', '').str.rstrip('%'), errors='coerce')   # blank → NaN
+    wb = 'AdmissionsEnrollmentStatistics'
+    sy = tableau_text_table(wb, 'SelectivityYield')[['Applied', 'Admitted', 'Enrolled', 'Selectivity', 'Yield']]
+    gpa = tableau_text_table(wb, 'AverageGPA').rename(columns={'Average GPA': 'Avg GPA', 'Included in Avg': 'GPA n'})[['Avg GPA', 'GPA n']]
+    gre = tableau_text_table(wb, 'AverageGRE').rename(columns={'Avg GRE Verbal': 'Avg GRE Verbal', 'Avg GRE Quant': 'Avg GRE Quant',
+                                                               'Avg GRE Writing': 'Avg GRE Writing', 'Included in Avg': 'GRE n'})
+    gre = gre[['Avg GRE Verbal', 'Avg GRE Quant', 'Avg GRE Writing', 'GRE n']]
+    d = sy.join(gpa).join(gre).apply(num).reset_index()
+    for c in ['Applied', 'Admitted', 'Enrolled']:
+        d[c] = d[c].astype(int)
+    d.insert(0, 'Admissions Cycle', 'S/Fall 2025')
+    d.to_csv(f'{GRAD}/admissions_enrollment_sfall2025.csv', index=False)
+    print('grad programs', len(d), 'with GPA', d['Avg GPA'].notna().sum(), 'with GRE', d['Avg GRE Quant'].notna().sum())
 
 if __name__ == '__main__':
     import sys
