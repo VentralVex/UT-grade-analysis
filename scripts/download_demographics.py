@@ -9,6 +9,7 @@ Sources
 - World Bank WDI SP.POP.TOTL (2025): national populations and the list of economies.
 - UNESCO Institute for Statistics indicator 25053: enrolment in tertiary education, all programmes (latest year since 2005);
   Taiwan (not in UIS): Ministry of Education, Education in Taiwan 2025-2026, SY2022 (1,140,089 students).
+- UT course catalog "Courses A-Z": course prefix -> full name (data/reference/course_prefixes.csv).
 - Map outlines (GeoJSON): Plotly's Census county file, PublicaMundi US states, Natural Earth 110m countries.
 - UT Graduate School "Admissions & Enrollment Statistics" dashboard (graduate.utexas.edu), S/Fall 2025 cycle:
   selectivity & yield, average GPA and average GRE tabs.
@@ -97,6 +98,19 @@ def tertiary_enrollment():
     print('uis tertiary', len(d), d.year.value_counts().sort_index().to_dict())
 
 
+
+def course_prefixes():
+    """Course prefix -> name from the UT catalog's Courses A-Z page."""
+    import html
+    page = requests.get('https://catalog.utexas.edu/general-information/coursesatoz/', timeout=120).text
+    rows = {}
+    for text in re.findall(r'<a href="/general-information/coursesatoz/[^"]+/">([^<]+)</a>', page):
+        prefix, _, name = html.unescape(text).replace('\u200b', '').partition(' -')
+        rows[prefix.strip()] = name.strip()
+    pd.Series(rows, name='Prefix Name').rename_axis('Course Prefix').sort_index().to_csv(f'{REF}/course_prefixes.csv')
+    print('course prefixes', len(rows))
+
+
 def geojson():
     src = {
         'tx_counties.geojson': 'https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json',
@@ -158,5 +172,5 @@ def grad_admissions():
 
 if __name__ == '__main__':
     import sys
-    for step in (sys.argv[1:] or ['ut_students', 'ipeds_staff', 'census', 'world_bank', 'tertiary_enrollment', 'geojson', 'grad_admissions']):
+    for step in (sys.argv[1:] or ['course_prefixes', 'ut_students', 'ipeds_staff', 'census', 'world_bank', 'tertiary_enrollment', 'geojson', 'grad_admissions']):
         globals()[step]()
